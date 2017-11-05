@@ -1,26 +1,46 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 
+import json
+import logging
 import random
-import pprint
 import datetime
-import smtplib
-from email.header import Header
-from email.mime.text import MIMEText
+import os
 import time
 
+from collections import namedtuple
 
-try:
-    import settings
-except ImportError:
-    raise ImportError("Error: you must provide a settings.py file")
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+import requests
+from clize import run
 
 
-def send_mail(present_from, present_to):
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
 
+
+# See sample_settings.py file.
+# This declaration is here for code inspection.
+settings = namedtuple(
+    'settings',
+    (
+        'PEOPLE',
+        'GROUP_NAME',
+        'MAIL_SUBJECT',
+        'MAIL_BODY',
+        'MAIL_FROM',
+        'MAIL_FROM_NAME',
+        'make_mail_body'
+    )
+)
+
+
+def prepare_email(present_from, present_to):
     people_from = people_to = None
-    # retrieve people_from and people_to
-    for people in settings.PEOPLE.values():
+    # Retrieve people_from and people_to
+    for people in settings.PEOPLE:
         if people[0] == present_from:
             people_from = people
         elif people[0] == present_to:
@@ -30,62 +50,311 @@ def send_mail(present_from, present_to):
     assert people_to is not None
     assert people_to != people_from
 
-    subject = settings.MAIL_SUBJECT.format(datetime.datetime.now().year)
-    body = settings.MAIL_BODY.format(people_from=people_from[1], people_to=people_to[1])
+    body = settings.make_mail_body(people_from[0], people_to[0])
 
-    mail_from = settings.MAIL_FROM.format(email=settings.EMAIL_HOST_USER)  # prevents spams
-    mail_to = people_from[2] if not settings.DEBUG else settings.DEBUG_MAIL
+    subject = settings.MAIL_SUBJECT.format(
+        year=datetime.datetime.now().year,
+        group_name=settings.GROUP_NAME
+    )
 
-    msg = MIMEText(body, _charset="UTF-8")
-    msg['Subject'] = Header(subject, charset="UTF-8")
-    msg['From'] = mail_from
+    from_email = settings.MAIL_FROM
+    from_mail_name = settings.MAIL_FROM_NAME
+    to_emails = people_from[1]
 
-    if settings.DEBUG:
-        print "="*50
-        print subject
-        print body
-        print ""
+    logger.debug('=' * 50)
+    logger.debug('from_email={}'.format(from_email))
+    logger.debug('from_mail_name={}'.format(from_mail_name))
+    logger.debug('to_emails={}'.format(to_emails))
+    logger.debug('subject={}'.format(subject))
+    logger.debug('Body={}'.format(body))
 
-    print "Send email to {}".format(mail_to)
-    server = smtplib.SMTP(settings.EMAIL_HOST, settings.EMAIL_PORT)
-    if settings.EMAIL_USE_TLS:
-        server.ehlo()
-        server.starttls()
-        server.login(settings.EMAIL_HOST_USER, settings.EMAIL_HOST_PASSWORD)
-    server.sendmail(mail_from, mail_to, msg.as_string())
-    server.quit()
-    time.sleep(4)  # prevents spams
+    return {
+        'from_email': from_email,
+        'from_mail_name': from_mail_name,
+        'subject': subject,
+        'to_emails': to_emails,
+        'body': body
+    }
 
 
-def random_presents():
+def send_via_gmail(from_email, from_mail_name, subject, to_emails, body):
+    """
+    In a nutshell, google is not allowing you to log in via smtp lib because
+    it has flagged this sort of login as 'less secure', so what you have to
+    do is go to this link while you're logged in to your google account, and
+    allow the access:
+
+    https://myaccount.google.com/lesssecureapps
+
+    Requires GMAIL_USER and GMAIL_PASSWORD env variables
+    """
+
+    logger.info('Sending email to {} via Gmail...'.format(to_emails))
+
+    server = smtplib.SMTP('smtp.gmail.com', 587)
+    server.ehlo()
+    server.starttls()
+    server.ehlo()
+    server.login(
+        user=os.environ['GMAIL_USER'],
+        password=os.environ['GMAIL_PASSWORD']
+    )
+
+    for to_email in to_emails:
+
+        msg = MIMEMultipart()
+        msg['From'] = '{} <{}>'.format(from_mail_name, from_email)
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body))
+
+        server.sendmail(from_email, to_email, msg.as_string())
+
+        time.sleep(random.randint(1, 5))
+
+        logger.info('Email sent to {}'.format(to_email))
+
+    server.close()
+    time.sleep(random.randint(1, 5))
+
+
+def send_via_sendinblue(from_email, from_mail_name, subject, to_emails, body):
+    """
+    Requires SENDINBLUE_API_KEY_V3 env variable
+
+    https://developers.sendinblue.com/v3/reference#sendtransacemail
+    """
+
+    logger.info('Sending email to {} via Sendinblue...'.format(to_emails))
+
+    url = 'https://api.sendinblue.com/v3/smtp/email'
+
+    payload = {
+        'sender': {
+            'name': from_mail_name,
+            'email': from_email
+        },
+        'to': [{'email': to_email} for to_email in to_emails],
+        'htmlContent': body,
+        'textContent': body,
+        'subject': subject,
+        'replyTo': {
+            'name': from_mail_name,
+            'email': from_email
+        }
+    }
+    headers = {
+        'api-key': os.environ['SENDINBLUE_API_KEY_V3'],
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
+
+    logger.info(
+        'Sendinblue response: status={}, message={}'.format(
+            response.status_code, response.text
+        )
+    )
+
+
+def send_via_sendgrid(from_email, from_mail_name, subject, to_emails, body):
+    """
+    Requires SENDGRID_API_KEY env variable
+
+    https://sendgrid.com/docs/API_Reference/api_v3.html
+    """
+
+    logger.info('Sending email to {} via Sendgrid...'.format(to_emails))
+
+    url = 'https://api.sendgrid.com/v3/mail/send'
+
+    payload = {
+        'personalizations': [
+            {
+                'to': [{'email': to_email} for to_email in to_emails],
+                'subject': subject
+            }
+        ],
+        'from': {
+            'email': from_email,
+            'name': from_mail_name
+        },
+        'content': [
+            {
+                'type': 'text/plain',
+                'value': body
+            }
+        ]
+    }
+
+    headers = {
+        'Authorization': 'Bearer {}'.format(os.environ['SENDGRID_API_KEY']),
+        'Content-Type': 'application/json',
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
+
+    logger.info(
+        'Sendgrid response: status={}, message={}'.format(
+            response.status_code, response.text
+        )
+    )
+
+
+def send_mail(**kwargs):
+    """
+    Send email via the right provider
+    """
+
+    if 'SENDGRID_API_KEY' in os.environ:
+        send_via_sendgrid(**kwargs)
+    elif 'SENDINBLUE_API_KEY_V3' in os.environ:
+        send_via_sendinblue(**kwargs)
+    elif 'GMAIL_USER' in os.environ and 'GMAIL_PASSWORD' in os.environ:
+        send_via_gmail(**kwargs)
+    else:
+        raise RuntimeError(
+            'Missing mandatory environment variables to be able to send emails'
+        )
+
+
+def backup(winners):
+
+    backup_file = '{}_{}_results.json'.format(
+        datetime.datetime.now().year,
+        settings.GROUP_NAME.lower().replace(' ', '-')
+    )
+
+    def t_str(data):
+        return '{} and {}'.format(*data) if len(data) == 2 else data[0]
+
+    logger.info('Backupping results to {} file...'.format(backup_file))
+
+    if os.path.isfile(backup_file):
+        raise RuntimeError('File {} already exist'.format(backup_file))
+
+    with open(backup_file, mode='w') as outfile:
+        outfile.write(
+            json.dumps({t_str(k): t_str(v) for k, v in winners.items()})
+        )
+
+
+def load_backup(year):
+
+    backup_file = '{}_{}_results.json'.format(
+        year,
+        settings.GROUP_NAME.lower().replace(' ', '-')
+    )
+    if not os.path.isfile(backup_file):
+        return {}
+
+    logger.info('Loading {} file...'.format(backup_file))
+
+    def f_str(data):
+        items = data.split(' and ')
+        return (items[0], items[1]) if len(items) == 2 else (items[0], )
+
+    with open(backup_file, mode='r') as outfile:
+        return {
+            f_str(k): f_str(v) for k, v in json.loads(outfile.read()).items()
+        }
+
+
+def solve():
+    """
+    Solve the constraints.
+    Inputs:
+        - settings.PEOPLE
+        - last year results
+
+    :return: dict {people_from_tuple: people_to_tuple}
+    """
+
     winners = {}
-    # brutal, not the good way to solve problem. TODO: changes method
-    for number, people in settings.PEOPLE.items():
-        slug = people[0]
+
+    last_year = load_backup(datetime.datetime.now().year - 1)
+
+    for index, people in enumerate(settings.PEOPLE):
+        # Brutal, not the good way to solve problem.
+
+        present_from = people[0]
         present_found = False
         cycle = 0
         while not present_found:
+
             cycle += 1
             if cycle > 1000:
-                raise RuntimeError('Too many cycles for {} (already found: {}'.format(slug, winners))
+                raise RuntimeError(
+                    'Unable to find a solution for {} (already found: '
+                    '{}'.format(present_from, winners)
+                )
 
-            try_for = settings.PEOPLE[random.randint(1, len(settings.PEOPLE))][0]
-            if try_for not in settings.CONSTRAINTS[slug] and try_for != slug and try_for not in set(winners.values()):
-                present_found = True
-                winners[slug] = try_for
+            rand = random.randint(0, len(settings.PEOPLE) - 1)
+            present_to = settings.PEOPLE[rand][0]
 
-    # checks:
+            if rand == index:
+                continue
+
+            if present_to in winners.values():
+                continue
+
+            if last_year and last_year.get(people[0]) == present_to:
+                continue
+
+            present_found = True
+            winners[present_from] = present_to
+
     assert set(winners.values()) != 10
+
+    logger.info('The solver found a solution.')
+    logger.debug('winners={}'.format(winners))
 
     return winners
 
-if __name__ == '__main__':
-    winners = random_presents()
-    if settings.DEBUG:
-        pprint.pprint(winners)
-    if settings.LOG:
-        with open('{}_generated.log'.format(datetime.datetime.now().year), mode='w+') as outfile:
-            outfile.write(pprint.pformat(winners))
 
-    for key, value in winners.items():
-        send_mail(key, value)
+def main(apply=False):
+
+    winners = solve()
+
+    if apply:
+        backup(winners)
+    else:
+        logger.info('Do not backup results')
+
+    for present_from, present_to in winners.items():
+
+        kwargs = prepare_email(present_from, present_to)
+
+        if not apply:
+            logger.info(
+                'Do not sent any email to {}'.format(present_from)
+            )
+            continue
+
+        send_mail(**kwargs)
+
+
+def local_handler(settings_file, *, apply=False, verbose=False):
+    """
+    Random drawing in a group to designate who will receive a gift.
+
+    :param settings_file: settings file to load
+    :param apply: Send emails to recipients
+    :param verbose: Increase output verbosity
+    """
+
+    global settings
+
+    settings = __import__(settings_file.split('.py')[0])
+    for item in settings.PEOPLE:
+        assert isinstance(item[0], tuple)
+        assert isinstance(item[1], tuple)
+
+    logger.setLevel(level=logging.DEBUG if verbose else logging.INFO)
+
+    main(apply=apply)
+
+
+if __name__ == '__main__':
+    run(local_handler)
