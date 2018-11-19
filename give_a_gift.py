@@ -79,12 +79,16 @@ def prepare_email(present_from, present_to):
 
 def send_via_gmail(from_email, from_mail_name, subject, to_emails, body):
     """
+    Hacking Gmail Security
+
     In a nutshell, google is not allowing you to log in via smtp lib because
     it has flagged this sort of login as 'less secure', so what you have to
     do is go to this link while you're logged in to your google account, and
     allow the access:
 
-    https://myaccount.google.com/lesssecureapps
+    1. Allow less secure apps: ON. (https://myaccount.google.com/lesssecureapps)
+    2. Display Unlock Captcha. (https://accounts.google.com/DisplayUnlockCaptcha)
+    3. Enable IMAP Access (https://mail.google.com/mail/#settings/fwdandpop)
 
     Requires GMAIL_USER and GMAIL_PASSWORD env variables
     """
@@ -252,7 +256,7 @@ def load_backup(year):
     logger.info('Loading {} file...'.format(backup_file))
 
     def f_str(data):
-        items = data.split(' and ')
+        items = data.replace(' et ', ' and ').split(' and ')
         return (items[0], items[1]) if len(items) == 2 else (items[0], )
 
     with open(backup_file, mode='r') as outfile:
