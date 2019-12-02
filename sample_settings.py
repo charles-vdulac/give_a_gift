@@ -1,15 +1,8 @@
-
-GROUP_NAME = 'Your Family Name'
+GROUP_NAME = "Your Family Name"
 
 PEOPLE = [
-    (
-        ('Couple First Name 1', 'Couple First Name 2'),
-        ('email 1', 'email 2')
-    ),
-    (
-        ('Single First Name 3', ),
-        ('email 3', )
-    ),
+    (("Couple First Name 1", "Couple First Name 2"), ("email 1", "email 2")),
+    (("Single First Name 3",), ("email 3",)),
 ]
 
 MAIL_SUBJECT = "Christmas {group_name} {year}"
@@ -19,8 +12,8 @@ MAIL_BODY = (
     "-- \n"
     "Santa Claus\n"
 )
-MAIL_FROM = 'your-email'
-MAIL_FROM_NAME = 'Santa Claus'
+MAIL_FROM = "your-email"
+MAIL_FROM_NAME = "Santa Claus"
 
 
 def make_mail_body(people_from, people_to):
@@ -40,7 +33,4 @@ def make_mail_body(people_from, people_to):
     else:
         people_to_str = "{} and {}".format(*people_to)
 
-    return MAIL_BODY.format(
-        people_from=people_from_str,
-        people_to=people_to_str
-    )
+    return MAIL_BODY.format(people_from=people_from_str, people_to=people_to_str)

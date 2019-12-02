@@ -1,2 +1,2 @@
-requests==2.18.4
-clize==4.0.1
+requests==2.22.0
+clize==4.1.1

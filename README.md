@@ -8,31 +8,31 @@ Randomly select who will give a gift to whom.
 
 ## Prerequisites
 
-* Python version >= 3.5
+* Python version >= 3.6
 
-* To send emails, you need a `Sendgrid` account or a `SendinBlue` account or a 
+* To send emails, you need a `Sendgrid` account or a `SendinBlue` account or a
   `Gmail` account
-  
-  * If you have a `Sendgrid` account, update the development environment 
+
+  * If you have a `Sendgrid` account, update the development environment
     with your `SENDGRID_API_KEY`:
-    
+
     ```bash
     $ export SENDGRID_API_KEY=xxxx
     ```
-    
-  * If you have a `SendinBlue` account, update the development environment 
+
+  * If you have a `SendinBlue` account, update the development environment
     with your `SENDINBLUE_API_KEY_V3`:
-    
+
     ```bash
     $ export SENDINBLUE_API_KEY_V3=xxxx
     ```
-    
-  * If you have a `Gmail` account, update the development environment with your 
-    `GMAIL_USER` and `GMAIL_PASSWORD`:
-    
+
+  * If you have a `Gmail` account, update the development environment with your
+    `GMAIL_USER`:
+
     ```bash
     $ export GMAIL_USER=xxxx
-    $ export GMAIL_PASSWORD=yyyy
+    $ export GMAIL_PASSWORD=yyyy  # Optional. In that case, password will be asked.
     ```
 
 ## Usage
